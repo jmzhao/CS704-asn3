@@ -9,6 +9,9 @@ SMT solver.
 import z3
 from z3 import Bool, Bools, And, Or, Xor, Implies, Not
 from z3 import Solver, sat, unsat
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
 
 SAFE = 1
 UNSAFE = 0
@@ -20,19 +23,30 @@ def is_tautology(formula) :
     if s.check() == unsat :
         return True, None
     return False, s.model()
-
-def is_equal(formula1, formula2) :
-    return is_tautology(formula1 == formula2)
+    
+def state_to_cube(state) :
+    return And([b == v 
+                for b, v in state.items() if v is not None])
 
 class PDR :
-    def __init__(self, bool_pairs, trans) :
-        self.bool_pairs = (bool_pairs)
+    def __init__(self, bool_pairs) :
         self.bools = [x for x, xp in bool_pairs]
         self.boolps = [xp for x, xp in bool_pairs]
-        self.trans = trans
+        self.bool_pairs = list(zip(self.bools, self.boolps))
+        self.boolp_pairs =  list(zip(self.boolps, self.bools))
+#        self.trans = trans
     
     def to_prime(self, formula) :
         return z3.substitute(formula, self.bool_pairs)
+    
+    def to_origin(self, formula) :
+        return z3.substitute(formula, self.boolp_pairs)
+        
+    def get_state_origin(self, model) :
+        return dict((b, model[b]) for b in self.bools)
+        
+    def get_state_prime(self, model) :
+        return dict((b, model[bp]) for b, bp in self.bool_pairs)
     
     def induct(self, R) :
         clauses = list()
@@ -41,17 +55,65 @@ class PDR :
                 clauses.append(c)
         return And(clauses)
         
-    def is_implied(self, f1, f2) :
-        return is_tautology(Implies(And(f1, self.trans), self.to_prime(f2)))
+    def is_implied(self, f1, f2, trans) :
+        return is_tautology(Implies(And(f1, trans), self.to_prime(f2)))
 
-    def back_prop(self, Rs, init, trans, post) :
+    def back_prop(self, Rs, init, trans, post, level=0) :
+        logging.debug("back_prop(%d): come in with"%(level))
+        logging.debug("  Rs=%s"%Rs)
+        logging.debug("  init=%s"%init)
+        logging.debug("  trans=%s"%trans)
+        logging.debug("  post=%s"%post)
+#        logging.debug("waited for keyboard" + str(input("Press anykey...")))
+        if len(Rs) == 0 :
+            res, counterexample = self.is_implied(init, post, trans)
+            if res : 
+                return SAFE, [], None
+            else :
+                return UNSAFE, None, [
+                    self.get_state_origin(counterexample),
+                    self.get_state_prime(counterexample),
+                ]
         Rn = Rs[-1]
         R0s = Rs[:-1]
+        nR0s = None
         while True :
-            res, counterexample = is_tautology(Implies(And(Rn, trans), self.to_prime(post)))
+            res, counterexample = (self.is_implied(And(*Rn), post, trans)
+                if level > 0 else is_tautology(Implies(And(*Rn), post)))
+            logging.debug("back_prop(%d): return from is_implied"%(level))
+            logging.debug("  res=%s"%res)
+            logging.debug("  counterexample=%s"%counterexample)
+            if res : break
+            state_origin = self.get_state_origin(counterexample)            
+            cube = state_to_cube(state_origin)
+            Rn.append(Not(cube))
+            check_res, nR0s, ce_seq = self.back_prop(R0s, init, trans, And(*Rn), level+1)
+            logging.debug("back_prop(%d): return from back_prop"%(level))
+            logging.debug("  check_res=%s"%check_res)
+            logging.debug("  nR0s=%s"%nR0s)
+            logging.debug("  ce_seq=%s"%ce_seq)
+            if check_res == UNSAFE :
+                cube_prev = state_to_cube(ce_seq[-1])
+                res, counterexample = self.is_implied(cube_prev, And(Not(cube), *Rn), trans)
+                assert not res
+                if level > 0 : ce_seq.append(self.get_state_prime(counterexample))
+                return UNSAFE, None, ce_seq
+        return SAFE, nR0s + [Rn], None
     
     def forward_prop(self, R1, maxlen, trans) :
-        pass
+        Rs = [R1]
+        R = R1
+        for _ in range(1, maxlen) :
+            nR = list()
+            for clause in R :
+                res, ce = self.is_implied(And(*R), clause, trans)
+                if res : 
+                    nR.append(clause)
+            Rs.append(nR)
+            if is_tautology(And(*R) == And(*nR)) :
+                break
+            R = nR
+        return Rs
     
     
     def pdr(self, init, trans, post) :
@@ -79,23 +141,15 @@ class PDR :
         counter_seq will be a sequence of states beginning in init and ending in 
         ~post(x).
         """
-        Rs = list(True)
+        Rs = [[And()]]
         
         while True :
             n = len(Rs)
-            check_res, clause, counterexample = back_prop(Rs, init, trans, post)
+            check_res, nRs, ce_seq = self.back_prop(Rs, init, trans, post)
+            logging.debug("pdr: %s %s %s"%(check_res, nRs, ce_seq))
             if check_res == UNSAFE :
-                return UNSAFE, None, self.extend(counterexample, trans, post)
-            R1 = self.cleanse(And(R1, clause))
-            Rs = self.forward_prop(R1, n + 1, trans)
-            if is_equal(Rs[-1], Rs[-2])[0] :
-                return SAFE, Rs[-1], None
-            
-x, y, z = Bools("x y z")
-xp, yp, zp = Bools("x' y' z'")
-init = And(x, y, z)
-trans = And(zp == Xor(x, y), xp == y, yp == Or(x, z))
-post = x
-check_res = SAFE
-inv = And(x, y)
-pdr = PDR([(x, xp), (y, yp), (z, zp)])
+                return UNSAFE, None, ce_seq
+#            R1 = self.cleanse(And(R1, clause))
+            Rs = self.forward_prop(nRs[0], n + 1, trans)
+            if is_tautology(And(*Rs[-1]) == And(*Rs[-2]))[0] :
+                return SAFE, And(*Rs[-1]), None
