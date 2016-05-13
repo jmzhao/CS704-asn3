@@ -11,13 +11,16 @@ from z3 import Bool, Bools, And, Or, Xor, Implies, Not
 from z3 import Solver, sat, unsat
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
+#logging.basicConfig(level=logging.DEBUG)
 
 SAFE = 1
 UNSAFE = 0
 UNKNOWN = -1
 
 def is_tautology(formula) :
+    """Check whether the formula is a tautology, and give a counterexample
+    if it is not.
+    """
     s = Solver()
     s.add(Not(formula))
     if s.check() == unsat :
@@ -60,13 +63,16 @@ class PDR :
 
     def back_prop(self, Rs, init, trans, post, level=0) :
         logging.debug("back_prop(%d): come in with"%(level))
-        logging.debug("  Rs=%s"%Rs)
         logging.debug("  init=%s"%init)
-        logging.debug("  trans=%s"%trans)
         logging.debug("  post=%s"%post)
+        logging.debug("  Rs=%s"%Rs)
+#        logging.debug("  trans=%s"%trans)
 #        logging.debug("waited for keyboard" + str(input("Press anykey...")))
         if len(Rs) == 0 :
             res, counterexample = self.is_implied(init, post, trans)
+            logging.debug("back_prop(%d): return from is_implied"%(level))
+            logging.debug("  res=%s"%res)
+            logging.debug("  counterexample=%s"%counterexample)
             if res : 
                 return SAFE, [], None
             else :
@@ -76,7 +82,7 @@ class PDR :
                 ]
         Rn = Rs[-1]
         R0s = Rs[:-1]
-        nR0s = None
+        nR0s = R0s
         while True :
             res, counterexample = (self.is_implied(And(*Rn), post, trans)
                 if level > 0 else is_tautology(Implies(And(*Rn), post)))
@@ -86,7 +92,7 @@ class PDR :
             if res : break
             state_origin = self.get_state_origin(counterexample)            
             cube = state_to_cube(state_origin)
-            Rn.append(Not(cube))
+            Rn = Rn + [(Not(cube))]
             check_res, nR0s, ce_seq = self.back_prop(R0s, init, trans, And(*Rn), level+1)
             logging.debug("back_prop(%d): return from back_prop"%(level))
             logging.debug("  check_res=%s"%check_res)
@@ -94,15 +100,20 @@ class PDR :
             logging.debug("  ce_seq=%s"%ce_seq)
             if check_res == UNSAFE :
                 cube_prev = state_to_cube(ce_seq[-1])
-                res, counterexample = self.is_implied(cube_prev, And(Not(cube), *Rn), trans)
-                assert not res
+                res, counterexample = self.is_implied(cube_prev, And(*Rn), trans)
+#                assert not res
                 if level > 0 : ce_seq.append(self.get_state_prime(counterexample))
                 return UNSAFE, None, ce_seq
         return SAFE, nR0s + [Rn], None
     
-    def forward_prop(self, R1, maxlen, trans) :
-        Rs = [R1]
-        R = R1
+    def forward_prop(self, R0, maxlen, trans) :
+        """
+        """
+        logging.debug("forward_prop: come in with")
+        logging.debug("  maxlen=%d"%maxlen)
+        logging.debug(" R0=%s"%R0)
+        Rs = [R0]
+        R = R0
         for _ in range(1, maxlen) :
             nR = list()
             for clause in R :
@@ -110,7 +121,7 @@ class PDR :
                 if res : 
                     nR.append(clause)
             Rs.append(nR)
-            if is_tautology(And(*R) == And(*nR)) :
+            if is_tautology(And(*R) == And(*nR))[0] :
                 break
             R = nR
         return Rs
@@ -141,15 +152,21 @@ class PDR :
         counter_seq will be a sequence of states beginning in init and ending in 
         ~post(x).
         """
-        Rs = [[And()]]
+        Rs = [[]]
         
         while True :
+#            input("Press anykey...")
             n = len(Rs)
             check_res, nRs, ce_seq = self.back_prop(Rs, init, trans, post)
-            logging.debug("pdr: %s %s %s"%(check_res, nRs, ce_seq))
+            logging.info("pdr: return from back_prop")
+            logging.info("  check_res=%s"%check_res)
+            logging.info("  nRs=%s"%nRs)
+            logging.info("  ce_seq=%s"%ce_seq)
             if check_res == UNSAFE :
                 return UNSAFE, None, ce_seq
 #            R1 = self.cleanse(And(R1, clause))
             Rs = self.forward_prop(nRs[0], n + 1, trans)
+            logging.debug("pdr: return from forward_prop")
+            logging.debug("  Rs=%s"%Rs)
             if is_tautology(And(*Rs[-1]) == And(*Rs[-2]))[0] :
                 return SAFE, And(*Rs[-1]), None
