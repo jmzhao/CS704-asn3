@@ -1,4 +1,5 @@
 # pdr
+A implementation of roperty-directed reachability (PDR) algorithm based on Z3 SMT solver.
 
 ## Folder structure
 ```
