@@ -145,9 +145,10 @@ case = {
                   ap == False),
     'expected_result' : {
         'check_res' : UNSAFE,
-        'ce_seq' : {a: False, b: False}, # 
+        'ce_start' : {a: False, b: False}, 
         'explanation' : "Any state within the initial condition."
     },
+    'note' : "This will last >10s on my laptop.",
 #    'skip' : True,
 }
 test_cases.append(case)  
