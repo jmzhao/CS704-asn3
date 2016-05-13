@@ -6,6 +6,7 @@ Test script for the implemented PDR solver.
 """
 
 import z3
+from z3 import Bool, Bools, And, Or, Xor, Implies, Not
 from pdr import *
 from testcases import test_cases
 import logging
@@ -22,8 +23,9 @@ def test(case_indices=range(len(test_cases))) :
     print("start testing..")
     
     for i_case in case_indices :
-        case = (test_cases[i_case])
         input("Press <Enter> to continue...")
+        print("="*30)
+        case = (test_cases[i_case])
         print("checking for test case %d..."%i_case)
         print("case name: %s"%case['name'])
         print("case description:", case['description'])
@@ -46,6 +48,8 @@ def test(case_indices=range(len(test_cases))) :
         logging.info("  inv=%s"%inv)
         logging.info("  ce_seq=%s"%ce_seq)
         
+        print("Results")
+        print("-"*30)
         print("checking safety...", end=" ")
         got = check_res
         exp = case['expected_result'].get('check_res')
@@ -79,5 +83,6 @@ def test(case_indices=range(len(test_cases))) :
             print("Explanation:", case.get('explanation'))
             
 if __name__ == '__main__' :
+    logging.basicConfig(level=logging.INFO)
     test()
         
