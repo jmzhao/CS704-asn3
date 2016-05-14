@@ -36,6 +36,7 @@ of property directed reachability." Formal Methods in Computer-Aided Design
 import z3
 from z3 import Bool, Bools, And, Or, Xor, Implies, Not
 from z3 import Solver, sat, unsat
+import util
 import logging
 
 __all__ = ['SAFE', 'UNSAFE', 'UNKNOWN', 'is_tautology', 'state_to_cube', 'PDR']
@@ -80,6 +81,11 @@ def state_to_cube(state) :
     """
     return And([b == v 
                 for b, v in state.items() if v is not None])
+                    
+def generalize_cube(cube, cube_tester) :
+    l_literal = util.generalize(cube.children(), 
+                                tester=lambda l : cube_tester(And(*l)))
+    return And(*l_literal)
 
 class PDR :
     """A implementation of roperty-directed reachability (PDR) algorithm that 
@@ -189,11 +195,14 @@ class PDR :
                     self.get_state_prime(counterexample),
                 ]
         Rn = Rs[-1]
-        R0s = Rs[:-1]
-        nR0s = R0s
+        nR0s = Rs[:-1]
         while True :
-            res, counterexample = (self.is_implied(And(*Rn), post, trans)
-                if level > 0 else is_tautology(Implies(And(*Rn), post)))
+            R0s = nR0s
+            is_satisfiable = (
+                (lambda formula : self.is_implied(formula, post, trans))
+                if level > 0 else
+                (lambda formula : is_tautology(Implies(formula, post))))
+            res, counterexample = is_satisfiable(And(*Rn))
             ## refine for $Rn -> post$ if this is the top level
             ## otherwise for $Rn ->_{trans} post$
             logging.debug("back_prop(%d): return from is_implied"%(level))
@@ -202,19 +211,30 @@ class PDR :
             if res : break ## exit if the last trace element agree with post
             state_origin = self.get_state_origin(counterexample)            
             cube = state_to_cube(state_origin)
+            if level > 0 :
+                logging.debug("back_prop(%d): generalize_cube"%(level))
+                logging.debug("  before cube=%s"%cube)
+                cube = generalize_cube(cube, 
+                                       lambda cube : self.back_prop(R0s, init, trans, And(Not(cube), *Rn), level+1)[0] == SAFE)
+                logging.debug("  after  cube=%s"%cube)
             Rn = Rn + [(Not(cube))] ## eclude the counterexample from the last trace element
-            check_res, nR0s, ce_seq = self.back_prop(R0s, init, trans, And(*Rn), level+1)
-            ## recursively refine back to the rest of trace
-            logging.debug("back_prop(%d): return from back_prop"%(level))
-            logging.debug("  check_res=%s"%check_res)
-            logging.debug("  nR0s=%s"%nR0s)
-            logging.debug("  ce_seq=%s"%ce_seq)
-            if check_res == UNSAFE : ## violates the initla while recursion
+            while True :
+                check_res, nR0s, ce_seq = self.back_prop(R0s, init, trans, And(*Rn), level+1)
+                ## recursively refine back to the rest of trace
+                logging.debug("back_prop(%d): return from back_prop"%(level))
+                logging.debug("  check_res=%s"%check_res)
+                logging.debug("  nR0s=%s"%nR0s)
+                logging.debug("  ce_seq=%s"%ce_seq)
+                if check_res == SAFE : break
+                ## violates the initla while recursion
                 cube_prev = state_to_cube(ce_seq[-1])
                 res, counterexample = self.is_implied(cube_prev, And(*Rn), trans)
                 ## find a counterexample state for the current step
-#                assert not res
-                if level > 0 : ce_seq.append(self.get_state_prime(counterexample))
+                if level > 0 : 
+                    if res :
+                        R0s[-1] = R0s[-1] + [Not(cube_prev)]
+                        continue
+                    ce_seq.append(self.get_state_prime(counterexample))
                 return UNSAFE, None, ce_seq
         return SAFE, nR0s + [Rn], None
     

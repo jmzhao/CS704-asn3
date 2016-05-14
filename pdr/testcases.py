@@ -262,9 +262,10 @@ case = {
     'trans' : test_cases.get_by(name="adder")['trans'],
     'expected_result' : {
         'check_res' : SAFE,
-        'inv' : True, 
-        'explanantion' : "Sorry, I don't know the loosest invariant."
+        'inv' : And(c, Not(f)), 
+        'explanation' : "Sorry, I don't know the loosest invariant."
     },
-    'note' : "**This case will run for a while (maybe > 60s).**"
+    'note' : """(after issue #1) **Now it runs in seconds!!!**
+    (depricated)**This case will run for a while (maybe > 60s).**""",
 }
 test_cases.append(case)  

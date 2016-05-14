@@ -19,13 +19,12 @@ safety_names = {
     UNKNOWN : "UNKNOWN",
 }
 
-def test(case_indices=range(len(test_cases))) :
+def test(cases=(test_cases)) :
     print("start testing..")
     
-    for i_case in case_indices :
+    for i_case, case in enumerate(cases) :
         input("Press <Enter> to continue...")
         print("="*30)
-        case = (test_cases[i_case])
         print("checking for test case %d..."%i_case)
         print("case name: %s"%case['name'])
         print("case description:", case['description'])
